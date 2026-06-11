@@ -28,11 +28,11 @@ const APP_NAME        = 'Helferkoordination';
 const TOURNAMENT_NAME = 'Internationales Fußballturnier';
 
 const TOURNAMENT_DAYS = [
-  { id:'12.08', label:'Di 12.08.', note:'Aufbautag' },
-  { id:'13.08', label:'Mi 13.08.', note:'' },
-  { id:'14.08', label:'Do 14.08.', note:'' },
-  { id:'15.08', label:'Fr 15.08.', note:'' },
-  { id:'16.08', label:'Sa 16.08.', note:'Abbautag' },
+  { id:'12.08.2027', label:'Mi 12.08.2027', note:'Aufbautag' },
+  { id:'13.08.2027', label:'Do 13.08.2027', note:'' },
+  { id:'14.08.2027', label:'Fr 14.08.2027', note:'' },
+  { id:'15.08.2027', label:'Sa 15.08.2027', note:'' },
+  { id:'16.08.2027', label:'So 16.08.2027', note:'Abbautag' },
 ];
 
 const TOURNAMENT_GROUPS = [
@@ -233,7 +233,7 @@ function AdminVerfügbarkeit() {
   const [groups,setGroups]=useState([]);
   const [memberships,setMemberships]=useState([]);
   const [loading,setLoading]=useState(true);
-  const [activeDay,setActiveDay]=useState('12.08');
+  const [activeDay,setActiveDay]=useState('12.08.2027');
 
   useEffect(()=>{(async()=>{
     const [a,u,g,m]=await Promise.all([getDocs(col('availability')),getDocs(col('users')),getDocs(col('groups')),getDocs(col('memberships'))]);
@@ -648,7 +648,7 @@ function HelperVerfügbarkeit({profile,show}) {
             <button key={d.id} onClick={()=>toggle(d.id)}
               className={`p-5 rounded-2xl border-2 text-center transition-all ${selected?'border-green-500 bg-green-50':'border-gray-200 bg-white hover:border-gray-300'}`}>
               <div className={`text-3xl mb-2 ${selected?'':'grayscale opacity-50'}`}>
-                {d.id==='12.08'?'🔧':d.id==='16.08'?'📦':'⚽'}
+                {d.id==='12.08.2027'?'🔧':d.id==='16.08.2027'?'📦':'⚽'}
               </div>
               <div className={`font-bold text-lg ${selected?'text-green-700':'text-gray-600'}`}>{d.label}</div>
               {d.note&&<div className={`text-xs mt-1 font-medium ${selected?'text-green-600':'text-orange-500'}`}>{d.note}</div>}
