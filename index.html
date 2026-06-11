@@ -386,13 +386,38 @@ function AdminHelpers({show}) {
   const [search,setSearch]=useState('');
   const [sel,setSel]=useState(null);
   const [addGrp,setAddGrp]=useState('');
+  const [editForm,setEditForm]=useState(null);
+  const [saving,setSaving]=useState(false);
+  const [confirmDelete,setConfirmDelete]=useState(false);
 
   const load=async()=>{setLoading(true);const [u,g,m,a]=await Promise.all([getDocs(col('users').orderBy('full_name')),getDocs(col('groups').orderBy('name')),getDocs(col('memberships')),getDocs(col('availability'))]);setUsers(u);setGroups(g);setMemberships(m);setAvails(a);setLoading(false);};
   useEffect(()=>{load();},[]);
 
+  const openEdit=(u)=>{setSel(u);setEditForm({full_name:u.full_name||'',phone:u.phone||'',email:u.email||''});setAddGrp('');setConfirmDelete(false);};
   const assignGroup=async()=>{if(!addGrp||!sel)return;if(memberships.find(m=>m.user_id===sel.id&&m.group_id===addGrp))return;await col('memberships').add({user_id:sel.id,group_id:addGrp,role:'member',created_at:ts()});load();setAddGrp('');show('Gruppe zugewiesen');};
   const removeFromGroup=async(uid,gid)=>{const m=memberships.find(x=>x.user_id===uid&&x.group_id===gid);if(m)await col('memberships').doc(m.id).delete();load();};
-  const toggleAdmin=async(u)=>{const r=u.role==='admin'?'helper':'admin';await col('users').doc(u.id).update({role:r});load();show(`${u.full_name} ist jetzt ${r==='admin'?'Admin':'Helfer'}`);};
+  const toggleAdmin=async(u)=>{const r=u.role==='admin'?'helper':'admin';await col('users').doc(u.id).update({role:r});const updated={...u,role:r};setSel(updated);load();show(`${u.full_name} ist jetzt ${r==='admin'?'Admin':'Helfer'}`);};
+
+  const saveEdit=async()=>{
+    if(!editForm||!sel)return;setSaving(true);
+    await col('users').doc(sel.id).update({full_name:editForm.full_name,phone:editForm.phone,email:editForm.email});
+    setSel({...sel,...editForm});
+    load();show('Helfer aktualisiert ✅');setSaving(false);
+  };
+
+  const deleteHelper=async()=>{
+    if(!sel)return;
+    const batch=db.batch();
+    // Mitgliedschaften löschen
+    memberships.filter(m=>m.user_id===sel.id).forEach(m=>batch.delete(col('memberships').doc(m.id)));
+    // Verfügbarkeit löschen
+    batch.delete(col('availability').doc(sel.id));
+    // User-Dokument löschen
+    batch.delete(col('users').doc(sel.id));
+    await batch.commit();
+    show(`${sel.full_name} wurde gelöscht`,'info');
+    setSel(null);setConfirmDelete(false);load();
+  };
 
   const filtered=users.filter(u=>(u.full_name||'').toLowerCase().includes(search.toLowerCase()));
   const userGroups=(uid)=>memberships.filter(m=>m.user_id===uid).map(m=>groups.find(g=>g.id===m.group_id)).filter(Boolean);
@@ -420,21 +445,56 @@ function AdminHelpers({show}) {
                 <td className="px-4 py-3 hidden md:table-cell"><div className="flex flex-wrap gap-1">{userGroups(u.id).map(g=><span key={g.id} className="text-xs px-2 py-0.5 rounded-full text-white" style={{background:g.color}}>{g.icon} {g.name}</span>)}</div></td>
                 <td className="px-4 py-3 hidden lg:table-cell"><div className="flex gap-1 flex-wrap">{TOURNAMENT_DAYS.map(d=><span key={d.id} className={`text-xs px-1.5 py-0.5 rounded ${getUserAvail(u.id).includes(d.id)?'bg-green-100 text-green-700':'bg-gray-100 text-gray-400'}`}>{d.id.slice(0,5)}</span>)}</div></td>
                 <td className="px-4 py-3"><Badge color={u.role==='admin'?'purple':'gray'}>{u.role==='admin'?'Admin':'Helfer'}</Badge></td>
-                <td className="px-4 py-3 text-right"><Btn variant="ghost" size="sm" onClick={()=>setSel(u)}>Bearbeiten</Btn></td>
+                <td className="px-4 py-3 text-right"><Btn variant="ghost" size="sm" onClick={()=>openEdit(u)}>✏️ Bearbeiten</Btn></td>
               </tr>
             ))}</tbody>
           </table>
         </div>
       )}
-      {sel&&(
-        <Modal title={`Helfer: ${sel.full_name}`} onClose={()=>setSel(null)}>
-          <div className="flex items-center gap-3 mb-5 pb-4 border-b"><Avatar name={sel.full_name} color={sel.avatar_color} size="lg"/><div><p className="font-semibold text-lg">{sel.full_name}</p><p className="text-xs text-gray-400">{sel.email}</p><Badge color={sel.role==='admin'?'purple':'gray'}>{sel.role==='admin'?'Admin':'Helfer'}</Badge></div></div>
-          <h3 className="font-medium mb-2 text-xs text-gray-500 uppercase tracking-wider">Verfügbar an</h3>
-          <div className="flex gap-2 mb-5 flex-wrap">{TOURNAMENT_DAYS.map(d=>{const ok=getUserAvail(sel.id).includes(d.id);return <span key={d.id} className={`text-sm px-3 py-1 rounded-full border ${ok?'bg-green-100 text-green-700 border-green-200':'bg-gray-50 text-gray-400 border-gray-200'}`}>{d.label}{d.note?` (${d.note})`:''}</span>;})}</div>
-          <h3 className="font-medium mb-3 text-xs text-gray-500 uppercase tracking-wider">Gruppen</h3>
+      {sel&&editForm&&(
+        <Modal title={`Helfer bearbeiten`} onClose={()=>{setSel(null);setConfirmDelete(false);}} wide>
+          <div className="flex items-center gap-3 mb-5 pb-4 border-b">
+            <Avatar name={sel.full_name} color={sel.avatar_color} size="lg"/>
+            <div><p className="font-semibold text-lg">{sel.full_name}</p><Badge color={sel.role==='admin'?'purple':'gray'}>{sel.role==='admin'?'Admin':'Helfer'}</Badge></div>
+          </div>
+
+          {/* Daten bearbeiten */}
+          <h3 className="font-medium mb-3 text-xs text-gray-500 uppercase tracking-wider">📝 Daten bearbeiten</h3>
+          <div className="grid grid-cols-2 gap-x-4 mb-4">
+            <div className="col-span-2"><Inp label="Name" value={editForm.full_name} onChange={e=>setEditForm({...editForm,full_name:e.target.value})}/></div>
+            <Inp label="E-Mail" type="email" value={editForm.email} onChange={e=>setEditForm({...editForm,email:e.target.value})}/>
+            <Inp label="Telefon" value={editForm.phone} onChange={e=>setEditForm({...editForm,phone:e.target.value})} placeholder="+49 …"/>
+          </div>
+          <Btn onClick={saveEdit} disabled={saving||!editForm.full_name.trim()} className="mb-5">{saving?'⏳ Speichern…':'💾 Daten speichern'}</Btn>
+
+          {/* Verfügbarkeit */}
+          <h3 className="font-medium mb-2 text-xs text-gray-500 uppercase tracking-wider">📅 Verfügbar an</h3>
+          <div className="flex gap-2 mb-5 flex-wrap">{TOURNAMENT_DAYS.map(d=>{const ok=getUserAvail(sel.id).includes(d.id);return <span key={d.id} className={`text-sm px-3 py-1 rounded-full border ${ok?'bg-green-100 text-green-700 border-green-200':'bg-gray-50 text-gray-400 border-gray-200'}`}>{d.label}{d.note?\` (${d.note})\`:''}</span>;})}</div>
+
+          {/* Gruppen */}
+          <h3 className="font-medium mb-3 text-xs text-gray-500 uppercase tracking-wider">🏢 Gruppen</h3>
           {assignedGroups.length===0?<p className="text-sm text-gray-400 mb-3">Keine Gruppe</p>:<div className="flex flex-wrap gap-2 mb-4">{assignedGroups.map(g=><span key={g.id} className="flex items-center gap-1.5 text-sm px-3 py-1 rounded-full text-white" style={{background:g.color}}>{g.icon} {g.name}<button onClick={()=>removeFromGroup(sel.id,g.id)} className="ml-1 opacity-70 hover:opacity-100">✕</button></span>)}</div>}
           {availableGroups.length>0&&<div className="flex gap-2 mb-5"><select value={addGrp} onChange={e=>setAddGrp(e.target.value)} className="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"><option value="">Gruppe hinzufügen…</option>{availableGroups.map(g=><option key={g.id} value={g.id}>{g.icon} {g.name}</option>)}</select><Btn onClick={assignGroup} disabled={!addGrp}>Hinzufügen</Btn></div>}
-          <div className="border-t pt-4 flex justify-between"><Btn variant="secondary" onClick={()=>toggleAdmin(sel)}>{sel.role==='admin'?'⬇️ Zu Helfer':'⬆️ Zu Admin'}</Btn><Btn variant="secondary" onClick={()=>setSel(null)}>Schließen</Btn></div>
+
+          {/* Aktionen */}
+          <div className="border-t pt-4 flex items-center justify-between gap-2 flex-wrap">
+            <div className="flex gap-2">
+              {!confirmDelete?(
+                <Btn variant="danger" onClick={()=>setConfirmDelete(true)}>🗑️ Helfer löschen</Btn>
+              ):(
+                <div className="flex items-center gap-2 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+                  <span className="text-sm text-red-700 font-medium">Wirklich löschen?</span>
+                  <Btn variant="danger" size="sm" onClick={deleteHelper}>Ja, löschen</Btn>
+                  <Btn variant="secondary" size="sm" onClick={()=>setConfirmDelete(false)}>Abbrechen</Btn>
+                </div>
+              )}
+            </div>
+            <div className="flex gap-2">
+              <Btn variant="secondary" onClick={()=>toggleAdmin(sel)}>{sel.role==='admin'?'⬇️ Zu Helfer':'⬆️ Zu Admin'}</Btn>
+              <Btn variant="secondary" onClick={()=>{setSel(null);setConfirmDelete(false);}}>Schließen</Btn>
+            </div>
+          </div>
+          <p className="text-xs text-gray-400 mt-2">Hinweis: Der Firebase-Auth-Account des Helfers bleibt bestehen. Zum vollständigen Löschen bitte auch in der Firebase Console unter Authentication entfernen.</p>
         </Modal>
       )}
     </div>
