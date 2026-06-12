@@ -627,6 +627,7 @@ function AdminTasks({show}) {
   const [showForm,setShowForm]=useState(false);
   const [editing,setEditing]=useState(null);
   const [filter,setFilter]=useState('all');
+  const [groupFilter,setGroupFilter]=useState(null); // null = alle Gruppen
   const [form,setForm]=useState({title:'',description:'',group_id:'',assigned_to:'',priority:'normal',status:'open',location:''});
 
   const load=async()=>{setLoading(true);const [t,u,g]=await Promise.all([getDocs(col('tasks')),getDocs(col('users').orderBy('full_name')),getDocs(col('groups').orderBy('name'))]);const uMap=Object.fromEntries(u.map(x=>[x.id,x]));const gMap=Object.fromEntries(g.map(x=>[x.id,x]));setTasks(sortBy(t,'created_at',true).map(x=>({...x,profile:x.assigned_to?uMap[x.assigned_to]:null,group:x.group_id?gMap[x.group_id]:null})));setUsers(u);setGroups(g);setLoading(false);};
@@ -634,11 +635,45 @@ function AdminTasks({show}) {
 
   const save=async()=>{if(!form.title.trim())return;const uid=auth.currentUser?.uid;const data={...form,group_id:form.group_id||null,assigned_to:form.assigned_to||null};if(editing)await col('tasks').doc(editing.id).update(data);else await col('tasks').add({...data,created_by:uid,created_at:ts()});load();setShowForm(false);show(editing?'Aktualisiert':'Erstellt');};
   const del=async(t)=>{if(!confirm(`"${t.title}" löschen?`))return;await col('tasks').doc(t.id).delete();load();show('Gelöscht');};
-  const filtered=filter==='all'?tasks:tasks.filter(t=>t.status===filter);
+
+  const tasksForGroup=(gid)=>tasks.filter(t=>t.group_id===gid);
+  const tasksNoGroup=tasks.filter(t=>!t.group_id);
+  const filtered=(groupFilter==='none'?tasksNoGroup:groupFilter?tasks.filter(t=>t.group_id===groupFilter):tasks).filter(t=>filter==='all'||t.status===filter);
+  const activeGroup=groupFilter?groups.find(g=>g.id===groupFilter):null;
 
   return (
     <div>
       <div className="flex items-center justify-between mb-5"><h1 className="text-2xl font-bold">✅ Aufgaben</h1><Btn onClick={()=>{setEditing(null);setForm({title:'',description:'',group_id:'',assigned_to:'',priority:'normal',status:'open',location:''});setShowForm(true);}}>+ Neue Aufgabe</Btn></div>
+
+      {/* Gruppen-Kacheln */}
+      {loading?<Spinner/>:<>
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
+        <button onClick={()=>setGroupFilter(null)} className={`rounded-2xl p-4 text-left border transition-all card-hover ${groupFilter===null?'border-red-500 bg-red-900/20 glow':'border-zinc-800 bg-zinc-900 hover:border-zinc-700'}`}>
+          <div className="text-xl mb-2">📋</div>
+          <div className={`text-2xl font-bold mb-0.5 ${groupFilter===null?'text-red-300':'text-white'}`}>{tasks.length}</div>
+          <div className="text-xs text-zinc-500">Alle Aufgaben</div>
+        </button>
+        <button onClick={()=>setGroupFilter('none')} className={`rounded-2xl p-4 text-left border transition-all card-hover ${groupFilter==='none'?'border-red-500 bg-red-900/20 glow':'border-zinc-800 bg-zinc-900 hover:border-zinc-700'}`}>
+          <div className="text-xl mb-2">🔓</div>
+          <div className={`text-2xl font-bold mb-0.5 ${groupFilter==='none'?'text-red-300':'text-white'}`}>{tasksNoGroup.length}</div>
+          <div className="text-xs text-zinc-500">Ohne Gruppe</div>
+        </button>
+        {groups.map(g=>{const cnt=tasksForGroup(g.id).length;return(
+          <button key={g.id} onClick={()=>setGroupFilter(g.id)} className={`rounded-2xl p-4 text-left border transition-all card-hover ${groupFilter===g.id?'border-red-500 glow':'border-zinc-800 bg-zinc-900 hover:border-zinc-700'}`} style={groupFilter===g.id?{background:g.color+'18'}:{}}>
+            <div className="text-xl mb-2">{g.icon}</div>
+            <div className="text-2xl font-bold mb-0.5" style={{color:groupFilter===g.id?g.color:'white'}}>{cnt}</div>
+            <div className="text-xs text-zinc-500 truncate">{g.name}</div>
+          </button>
+        );})}
+      </div>
+
+      {/* Aktive Gruppe Header */}
+      {activeGroup&&<div className="flex items-center gap-2 mb-4 px-4 py-2.5 rounded-xl border" style={{background:activeGroup.color+'12',borderColor:activeGroup.color+'30'}}>
+        <span className="text-lg">{activeGroup.icon}</span>
+        <span className="font-semibold" style={{color:activeGroup.color}}>{activeGroup.name}</span>
+        <button onClick={()=>setGroupFilter(null)} className="ml-auto text-xs text-zinc-600 hover:text-zinc-400">✕ Alle anzeigen</button>
+      </div>}
+
       <div className="flex gap-2 mb-4 flex-wrap">
         {[['all','Alle'],['open','Offen'],['in_progress','In Arbeit'],['done','Erledigt']].map(([v,l])=>(
           <button key={v} onClick={()=>setFilter(v)} className={`px-3 py-1.5 rounded-xl text-sm font-medium transition-all ${filter===v?'bg-red-600 text-white':'bg-zinc-900 text-zinc-400 border border-zinc-800 hover:border-zinc-700'}`}>{l}</button>
@@ -775,15 +810,14 @@ function HelperVerfügbarkeit({profile,show}) {
 }
 
 // ══════════════════════════════════════════════════════════════
-// HELFER — AUFGABEN (Allgemein + Gruppe)
+// HELFER — AUFGABEN (zwei Kacheln)
 // ══════════════════════════════════════════════════════════════
-function HelperTasks({profile,show,defaultTab='all'}) {
-  const [allTasks,setAllTasks]=useState([]);
+function HelperTasks({profile,show,defaultTab='group'}) {
+  const [myTasks,setMyTasks]=useState([]);
   const [groupTasks,setGroupTasks]=useState([]);
-  const [myGroupId,setMyGroupId]=useState(null);
-  const [myGroupName,setMyGroupName]=useState('');
+  const [myGroup,setMyGroup]=useState(null);
   const [loading,setLoading]=useState(true);
-  const [tab,setTab]=useState(defaultTab);
+  const [view,setView]=useState(defaultTab); // 'mine' | 'group'
 
   const load=async()=>{
     setLoading(true);
@@ -791,21 +825,18 @@ function HelperTasks({profile,show,defaultTab='all'}) {
     const gMap=Object.fromEntries(groups.map(x=>[x.id,x]));
     const myMem=memberships[0];
     const myGid=myMem?myMem.group_id:null;
-    const myGrp=myGid?gMap[myGid]:null;
-    setMyGroupId(myGid);
-    setMyGroupName(myGrp?myGrp.name:'');
+    const grp=myGid?gMap[myGid]:null;
+    setMyGroup(grp);
     const enriched=sortBy(allT,'created_at',true).map(x=>({...x,group:x.group_id?gMap[x.group_id]:null}));
-    // Allgemeine Aufgaben = ohne Gruppe ODER mir zugewiesen
-    setAllTasks(enriched.filter(t=>!t.group_id||t.assigned_to===profile.id));
-    // Gruppen-Aufgaben = Aufgaben meiner Gruppe
+    setMyTasks(enriched.filter(t=>t.assigned_to===profile.id));
     setGroupTasks(myGid?enriched.filter(t=>t.group_id===myGid):[]);
     setLoading(false);
   };
   useEffect(()=>{load();},[profile]);
   const updateStatus=async(id,status)=>{await col('tasks').doc(id).update({status});load();show('Status aktualisiert');};
 
-  const TaskList=({tasks})=>(
-    <div className="space-y-3">
+  const TaskList=({tasks,emptyMsg})=>(
+    <div className="space-y-3 mt-5">
       {tasks.map(t=>(
         <Card key={t.id} className="p-5">
           <div className="flex items-start justify-between">
@@ -814,7 +845,6 @@ function HelperTasks({profile,show,defaultTab='all'}) {
                 <h3 className="font-semibold">{t.title}</h3>
                 <Badge color={priorityColor[t.priority]}>{priorityLabel[t.priority]}</Badge>
                 {t.group&&<span className="text-xs px-2 py-0.5 rounded-full text-white font-medium" style={{background:t.group.color}}>{t.group.icon} {t.group.name}</span>}
-                {t.assigned_to===profile.id&&<Badge color="red">Mir zugewiesen</Badge>}
               </div>
               {t.description&&<p className="text-sm text-zinc-500 mb-2">{t.description}</p>}
               {t.location&&<p className="text-xs text-zinc-600">📍 {t.location}</p>}
@@ -829,29 +859,40 @@ function HelperTasks({profile,show,defaultTab='all'}) {
           </div>
         </Card>
       ))}
-      {tasks.length===0&&<div className="bg-zinc-900/50 border border-dashed border-zinc-800 rounded-2xl p-8 text-center text-zinc-600 text-sm">Keine Aufgaben in dieser Ansicht</div>}
+      {tasks.length===0&&<div className="bg-zinc-900/50 border border-dashed border-zinc-800 rounded-2xl p-8 text-center text-zinc-600 text-sm">{emptyMsg}</div>}
     </div>
   );
 
   return (
     <div>
-      <h1 className="text-2xl font-bold mb-5">✅ Aufgaben</h1>
-      <div className="flex gap-2 mb-6 p-1 bg-zinc-900 border border-zinc-800 rounded-2xl w-fit">
-        <button onClick={()=>setTab('all')} className={`px-5 py-2 rounded-xl text-sm font-medium transition-all ${tab==='all'?'bg-red-600 text-white shadow-lg shadow-red-900/30':'text-zinc-500 hover:text-zinc-300'}`}>
-          📋 Allgemeine Aufgaben <span className="ml-1.5 text-xs opacity-70">({allTasks.length})</span>
+      <h1 className="text-2xl font-bold mb-6">✅ Aufgaben</h1>
+
+      {/* Zwei Kacheln */}
+      <div className="grid grid-cols-2 gap-4 mb-6">
+        <button onClick={()=>setView('mine')} className={`rounded-2xl p-5 text-left border-2 transition-all card-hover ${view==='mine'?'border-red-500 bg-red-900/15 glow':'border-zinc-800 bg-zinc-900 hover:border-zinc-700'}`}>
+          <div className="text-3xl mb-3">👤</div>
+          <div className={`text-4xl font-bold mb-1 ${view==='mine'?'text-red-300':'text-white'}`}>{myTasks.length}</div>
+          <div className="font-semibold text-sm mb-0.5">Meine Aufgaben</div>
+          <div className="text-xs text-zinc-600">Dir persönlich zugewiesen</div>
+          <div className={`mt-3 text-xs font-medium ${view==='mine'?'text-red-400':'text-zinc-600'}`}>{view==='mine'?'▶ Aktive Ansicht':'→ Anzeigen'}</div>
         </button>
-        <button onClick={()=>setTab('group')} className={`px-5 py-2 rounded-xl text-sm font-medium transition-all ${tab==='group'?'bg-red-600 text-white shadow-lg shadow-red-900/30':'text-zinc-500 hover:text-zinc-300'}`}>
-          🏢 {myGroupName||'Meine Gruppe'} <span className="ml-1.5 text-xs opacity-70">({groupTasks.length})</span>
+
+        <button onClick={()=>setView('group')} className={`rounded-2xl p-5 text-left border-2 transition-all card-hover ${view==='group'?'border-red-500 glow':'border-zinc-800 bg-zinc-900 hover:border-zinc-700'}`}
+          style={view==='group'&&myGroup?{background:myGroup.color+'18',borderColor:myGroup.color+'80'}:{}}>
+          <div className="text-3xl mb-3">{myGroup?myGroup.icon:'🏢'}</div>
+          <div className="text-4xl font-bold mb-1" style={{color:view==='group'&&myGroup?myGroup.color:'white'}}>{groupTasks.length}</div>
+          <div className="font-semibold text-sm mb-0.5">Orgagruppen-Aufgaben</div>
+          <div className="text-xs text-zinc-600">{myGroup?myGroup.name:'Alle Aufgaben der Gruppe'}</div>
+          <div className={`mt-3 text-xs font-medium ${view==='group'?'text-red-400':'text-zinc-600'}`}>{view==='group'?'▶ Aktive Ansicht':'→ Anzeigen'}</div>
         </button>
       </div>
-      {tab==='all'&&<div>
-        <p className="text-xs text-zinc-600 mb-4">Allgemeine Aufgaben ohne Gruppenzuordnung + dir persönlich zugewiesene Aufgaben.</p>
-        {loading?<Spinner/>:<TaskList tasks={allTasks}/>}
-      </div>}
-      {tab==='group'&&<div>
-        {myGroupId?<p className="text-xs text-zinc-600 mb-4">Alle Aufgaben deiner Gruppe: <span className="text-red-400">{myGroupName}</span></p>:<p className="text-xs text-zinc-600 mb-4">Du bist noch keiner Gruppe zugeordnet.</p>}
-        {loading?<Spinner/>:<TaskList tasks={groupTasks}/>}
-      </div>}
+
+      {/* Aufgabenliste */}
+      {loading?<Spinner/>:view==='mine'?(
+        <TaskList tasks={myTasks} emptyMsg="Dir sind keine Aufgaben zugewiesen."/>
+      ):(
+        <TaskList tasks={groupTasks} emptyMsg={myGroup?`Keine Aufgaben für ${myGroup.name}.`:"Du bist noch keiner Gruppe zugeordnet."}/>
+      )}
     </div>
   );
 }
