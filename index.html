@@ -234,7 +234,7 @@ function AdminDashboard({profile,setPage}) {
   const tiles=[
     {label:'Helfer',value:stats.helpers,icon:'👥',page:'helpers',color:'from-red-900/40 to-red-950/60',border:'border-red-900/40',accent:'text-red-400'},
     {label:'Orgagruppen',value:stats.groups,icon:'🏢',page:'groups',color:'from-zinc-800/60 to-zinc-900/60',border:'border-zinc-700/40',accent:'text-zinc-300'},
-    {label:'Aufgaben',value:stats.tasks,icon:'✅',page:'tasks',color:'from-zinc-800/60 to-zinc-900/60',border:'border-zinc-700/40',accent:'text-zinc-300'},
+    {label:'Aufgaben',value:stats.tasks,icon:'✅',page:'grouptasks',color:'from-zinc-800/60 to-zinc-900/60',border:'border-zinc-700/40',accent:'text-zinc-300'},
     {label:'Verfügbarkeiten',value:stats.avail,icon:'📅',page:'availability',color:'from-zinc-800/60 to-zinc-900/60',border:'border-zinc-700/40',accent:'text-zinc-300'},
     {label:'Neue Nachrichten',value:stats.msgs,icon:'✉️',page:'messages',color:stats.msgs>0?'from-red-900/40 to-red-950/60':'from-zinc-800/60 to-zinc-900/60',border:stats.msgs>0?'border-red-900/40':'border-zinc-700/40',accent:stats.msgs>0?'text-red-400':'text-zinc-300'},
   ];
@@ -344,7 +344,7 @@ function HelperDashboard({profile,setPage}) {
           )}
         </button>
 
-        <button onClick={()=>setPage('tasks')} className="bg-zinc-900 border border-zinc-800 rounded-2xl p-5 text-left card-hover group">
+        <button onClick={()=>setPage('grouptasks')} className="bg-zinc-900 border border-zinc-800 rounded-2xl p-5 text-left card-hover group">
           <div className="flex items-center justify-between mb-4">
             <h2 className="font-semibold flex items-center gap-2"><span className="w-1 h-4 bg-red-500 rounded-full inline-block"/>Meine Aufgaben</h2>
             <span className="text-zinc-600 group-hover:text-red-500 transition-colors text-sm">→</span>
@@ -775,27 +775,82 @@ function HelperVerfügbarkeit({profile,show}) {
 }
 
 // ══════════════════════════════════════════════════════════════
-// HELFER — AUFGABEN
+// HELFER — AUFGABEN (Allgemein + Gruppe)
 // ══════════════════════════════════════════════════════════════
-function HelperTasks({profile,show}) {
-  const [tasks,setTasks]=useState([]);
+function HelperTasks({profile,show,defaultTab='all'}) {
+  const [allTasks,setAllTasks]=useState([]);
+  const [groupTasks,setGroupTasks]=useState([]);
+  const [myGroupId,setMyGroupId]=useState(null);
+  const [myGroupName,setMyGroupName]=useState('');
   const [loading,setLoading]=useState(true);
-  const load=async()=>{setLoading(true);const [t,g]=await Promise.all([getDocs(col('tasks').where('assigned_to','==',profile.id)),getDocs(col('groups'))]);const gMap=Object.fromEntries(g.map(x=>[x.id,x]));setTasks(sortBy(t,'created_at',true).map(x=>({...x,group:x.group_id?gMap[x.group_id]:null})));setLoading(false);};
+  const [tab,setTab]=useState(defaultTab);
+
+  const load=async()=>{
+    setLoading(true);
+    const [allT,groups,memberships]=await Promise.all([getDocs(col('tasks')),getDocs(col('groups')),getDocs(col('memberships').where('user_id','==',profile.id))]);
+    const gMap=Object.fromEntries(groups.map(x=>[x.id,x]));
+    const myMem=memberships[0];
+    const myGid=myMem?myMem.group_id:null;
+    const myGrp=myGid?gMap[myGid]:null;
+    setMyGroupId(myGid);
+    setMyGroupName(myGrp?myGrp.name:'');
+    const enriched=sortBy(allT,'created_at',true).map(x=>({...x,group:x.group_id?gMap[x.group_id]:null}));
+    // Allgemeine Aufgaben = ohne Gruppe ODER mir zugewiesen
+    setAllTasks(enriched.filter(t=>!t.group_id||t.assigned_to===profile.id));
+    // Gruppen-Aufgaben = Aufgaben meiner Gruppe
+    setGroupTasks(myGid?enriched.filter(t=>t.group_id===myGid):[]);
+    setLoading(false);
+  };
   useEffect(()=>{load();},[profile]);
   const updateStatus=async(id,status)=>{await col('tasks').doc(id).update({status});load();show('Status aktualisiert');};
+
+  const TaskList=({tasks})=>(
+    <div className="space-y-3">
+      {tasks.map(t=>(
+        <Card key={t.id} className="p-5">
+          <div className="flex items-start justify-between">
+            <div className="flex-1">
+              <div className="flex items-center gap-2 flex-wrap mb-1">
+                <h3 className="font-semibold">{t.title}</h3>
+                <Badge color={priorityColor[t.priority]}>{priorityLabel[t.priority]}</Badge>
+                {t.group&&<span className="text-xs px-2 py-0.5 rounded-full text-white font-medium" style={{background:t.group.color}}>{t.group.icon} {t.group.name}</span>}
+                {t.assigned_to===profile.id&&<Badge color="red">Mir zugewiesen</Badge>}
+              </div>
+              {t.description&&<p className="text-sm text-zinc-500 mb-2">{t.description}</p>}
+              {t.location&&<p className="text-xs text-zinc-600">📍 {t.location}</p>}
+            </div>
+            <div className="ml-4">
+              <Sel value={t.status} onChange={e=>updateStatus(t.id,e.target.value)}>
+                <option value="open">Offen</option>
+                <option value="in_progress">In Arbeit</option>
+                <option value="done">Erledigt</option>
+              </Sel>
+            </div>
+          </div>
+        </Card>
+      ))}
+      {tasks.length===0&&<div className="bg-zinc-900/50 border border-dashed border-zinc-800 rounded-2xl p-8 text-center text-zinc-600 text-sm">Keine Aufgaben in dieser Ansicht</div>}
+    </div>
+  );
+
   return (
     <div>
-      <h1 className="text-2xl font-bold mb-5">✅ Meine Aufgaben</h1>
-      {loading?<Spinner/>:<div className="space-y-3">
-        {tasks.map(t=>(
-          <Card key={t.id} className="p-5">
-            <div className="flex items-start justify-between">
-              <div className="flex-1"><div className="flex items-center gap-2 flex-wrap mb-1"><h3 className="font-semibold">{t.title}</h3><Badge color={priorityColor[t.priority]}>{priorityLabel[t.priority]}</Badge>{t.group&&<span className="text-xs px-2 py-0.5 rounded-full text-white font-medium" style={{background:t.group.color}}>{t.group.icon} {t.group.name}</span>}</div>{t.description&&<p className="text-sm text-zinc-500 mb-2">{t.description}</p>}{t.location&&<p className="text-xs text-zinc-600">📍 {t.location}</p>}</div>
-              <div className="ml-4"><Sel value={t.status} onChange={e=>updateStatus(t.id,e.target.value)}><option value="open">Offen</option><option value="in_progress">In Arbeit</option><option value="done">Erledigt</option></Sel></div>
-            </div>
-          </Card>
-        ))}
-        {tasks.length===0&&<p className="text-zinc-600 text-sm">Keine Aufgaben zugewiesen.</p>}
+      <h1 className="text-2xl font-bold mb-5">✅ Aufgaben</h1>
+      <div className="flex gap-2 mb-6 p-1 bg-zinc-900 border border-zinc-800 rounded-2xl w-fit">
+        <button onClick={()=>setTab('all')} className={`px-5 py-2 rounded-xl text-sm font-medium transition-all ${tab==='all'?'bg-red-600 text-white shadow-lg shadow-red-900/30':'text-zinc-500 hover:text-zinc-300'}`}>
+          📋 Allgemeine Aufgaben <span className="ml-1.5 text-xs opacity-70">({allTasks.length})</span>
+        </button>
+        <button onClick={()=>setTab('group')} className={`px-5 py-2 rounded-xl text-sm font-medium transition-all ${tab==='group'?'bg-red-600 text-white shadow-lg shadow-red-900/30':'text-zinc-500 hover:text-zinc-300'}`}>
+          🏢 {myGroupName||'Meine Gruppe'} <span className="ml-1.5 text-xs opacity-70">({groupTasks.length})</span>
+        </button>
+      </div>
+      {tab==='all'&&<div>
+        <p className="text-xs text-zinc-600 mb-4">Allgemeine Aufgaben ohne Gruppenzuordnung + dir persönlich zugewiesene Aufgaben.</p>
+        {loading?<Spinner/>:<TaskList tasks={allTasks}/>}
+      </div>}
+      {tab==='group'&&<div>
+        {myGroupId?<p className="text-xs text-zinc-600 mb-4">Alle Aufgaben deiner Gruppe: <span className="text-red-400">{myGroupName}</span></p>:<p className="text-xs text-zinc-600 mb-4">Du bist noch keiner Gruppe zugeordnet.</p>}
+        {loading?<Spinner/>:<TaskList tasks={groupTasks}/>}
       </div>}
     </div>
   );
@@ -989,7 +1044,7 @@ function App() {
   const isAdmin=profile.role==='admin';
   const nav=isAdmin
     ?[{id:'dashboard',icon:'⊞',label:'Dashboard'},{id:'helpers',icon:'👥',label:'Helfer'},{id:'groups',icon:'🏢',label:'Orgagruppen'},{id:'tasks',icon:'✅',label:'Aufgaben'},{id:'availability',icon:'📅',label:'Verfügbarkeit'},{id:'messages',icon:'✉️',label:'Nachrichten'},{id:'notifications',icon:'🔔',label:'Benachrichtigungen'}]
-    :[{id:'dashboard',icon:'⊞',label:'Übersicht'},{id:'availability',icon:'📅',label:'Verfügbarkeit'},{id:'tasks',icon:'✅',label:'Meine Aufgaben'},{id:'message',icon:'✉️',label:'Nachricht senden'},{id:'notifications',icon:'🔔',label:'Benachrichtigungen'},{id:'profile',icon:'👤',label:'Mein Profil'}];
+    :[{id:'dashboard',icon:'⊞',label:'Übersicht'},{id:'availability',icon:'📅',label:'Verfügbarkeit'},{id:'tasks',icon:'✅',label:'Aufgaben'},{id:'message',icon:'✉️',label:'Nachricht senden'},{id:'notifications',icon:'🔔',label:'Benachrichtigungen'},{id:'profile',icon:'👤',label:'Mein Profil'}];
 
   const setPage=(page)=>{setActivePage(page);setMobileOpen(false);};
 
@@ -1007,7 +1062,8 @@ function App() {
     switch(activePage){
       case 'dashboard':     return <HelperDashboard profile={profile} setPage={setPage}/>;
       case 'availability':  return <HelperVerfügbarkeit profile={profile} show={show}/>;
-      case 'tasks':         return <HelperTasks profile={profile} show={show}/>;
+      case 'tasks':         return <HelperTasks profile={profile} show={show} defaultTab='all'/>;
+      case 'grouptasks':    return <HelperTasks profile={profile} show={show} defaultTab='group'/>;
       case 'message':       return <HelperNachricht profile={profile} show={show}/>;
       case 'notifications': return <NotificationsPage profile={profile}/>;
       case 'profile':       return <HelperProfile profile={profile} show={show} onUpdate={setProfile}/>;
