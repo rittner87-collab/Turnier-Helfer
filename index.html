@@ -493,6 +493,8 @@ function AdminHelpers({show}) {
   const [avails,setAvails]=useState([]);
   const [loading,setLoading]=useState(true);
   const [search,setSearch]=useState('');
+  const [roleFilter,setRoleFilter]=useState('all');
+  const [groupFilter,setGroupFilter]=useState('all');
   const [sel,setSel]=useState(null);
   const [addGrp,setAddGrp]=useState('');
   const [editForm,setEditForm]=useState(null);
@@ -509,8 +511,13 @@ function AdminHelpers({show}) {
   const saveEdit=async()=>{if(!editForm||!sel)return;setSaving(true);await col('users').doc(sel.id).update({full_name:editForm.full_name,phone:editForm.phone,email:editForm.email});setSel({...sel,...editForm});load();show('Helfer aktualisiert ✅');setSaving(false);};
   const deleteHelper=async()=>{if(!sel)return;const batch=db.batch();memberships.filter(m=>m.user_id===sel.id).forEach(m=>batch.delete(col('memberships').doc(m.id)));batch.delete(col('availability').doc(sel.id));batch.delete(col('users').doc(sel.id));await batch.commit();show(`${sel.full_name} wurde gelöscht`,'info');setSel(null);setConfirmDelete(false);load();};
 
-  const filtered=users.filter(u=>(u.full_name||'').toLowerCase().includes(search.toLowerCase()));
   const userGroups=(uid)=>memberships.filter(m=>m.user_id===uid).map(m=>groups.find(g=>g.id===m.group_id)).filter(Boolean);
+  const filtered=users.filter(u=>{
+    const matchSearch=(u.full_name||'').toLowerCase().includes(search.toLowerCase());
+    const matchRole=roleFilter==='all'||u.role===roleFilter;
+    const matchGroup=groupFilter==='all'||userGroups(u.id).some(g=>g.id===groupFilter);
+    return matchSearch&&matchRole&&matchGroup;
+  });
   const getUserAvail=(uid)=>{const a=avails.find(x=>x.user_id===uid);return a?a.days||[]:[];};
   const assignedGroups=sel?userGroups(sel.id):[];
   const availableGroups=groups.filter(g=>!assignedGroups.find(ag=>ag.id===g.id)&&!g.no_helpers);
@@ -519,6 +526,19 @@ function AdminHelpers({show}) {
     <div>
       <h1 className="text-2xl font-bold mb-5">👥 Helfer</h1>
       <input value={search} onChange={e=>setSearch(e.target.value)} className="bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-2.5 text-sm text-white placeholder-zinc-600 w-full max-w-sm mb-4 focus:outline-none focus:ring-2 focus:ring-red-500" placeholder="🔍 Suchen…"/>
+      {/* Rolle Filter */}
+      <div className="flex gap-2 mb-3 flex-wrap">
+        {[['all','👥 Alle'],['helper','🙋 Helfer'],['admin','⭐ Admin']].map(([v,l])=>(
+          <button key={v} onClick={()=>setRoleFilter(v)} className={`px-3 py-1.5 rounded-xl text-sm font-medium transition-all ${roleFilter===v?'bg-red-600 text-white':'bg-zinc-900 text-zinc-400 border border-zinc-800 hover:border-zinc-700'}`}>{l}</button>
+        ))}
+      </div>
+      {/* Orgagruppen Filter */}
+      {!loading&&groups.length>0&&<div className="flex gap-2 mb-4 flex-wrap">
+        <button onClick={()=>setGroupFilter('all')} className={`px-3 py-1.5 rounded-xl text-sm font-medium transition-all ${groupFilter==='all'?'bg-red-600 text-white':'bg-zinc-900 text-zinc-400 border border-zinc-800 hover:border-zinc-700'}`}>Alle Gruppen</button>
+        {groups.filter(g=>!g.no_helpers).map(g=>(
+          <button key={g.id} onClick={()=>setGroupFilter(g.id)} className={`px-3 py-1.5 rounded-xl text-sm font-medium transition-all flex items-center gap-1.5 ${groupFilter===g.id?'text-white border border-transparent':'bg-zinc-900 text-zinc-400 border border-zinc-800 hover:border-zinc-700'}`} style={groupFilter===g.id?{background:g.color,borderColor:g.color}:{}}>{g.icon} {g.name}</button>
+        ))}
+      </div>}
       {loading?<Spinner/>:(
         <Card>
           <table className="w-full text-sm">
