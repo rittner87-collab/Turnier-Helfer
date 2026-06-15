@@ -501,7 +501,7 @@ function AdminHelpers({show}) {
   const [saving,setSaving]=useState(false);
   const [confirmDelete,setConfirmDelete]=useState(false);
 
-  const load=async()=>{setLoading(true);const [u,g,m,a]=await Promise.all([getDocs(col('users').orderBy('full_name')),getDocs(col('groups').orderBy('name')),getDocs(col('memberships')),getDocs(col('availability'))]);setUsers(u);setGroups(g);setMemberships(m);setAvails(a);setLoading(false);};
+  const load=async()=>{setLoading(true);const [u,g,m,a]=await Promise.all([getDocs(col('users').orderBy('full_name')),getDocs(col('groups').orderBy('name')),getDocs(col('memberships')),getDocs(col('availability'))]);const mArr=m;const byName={};for(const gr of g){const cnt=mArr.filter(x=>x.group_id===gr.id).length;if(!byName[gr.name]||cnt>mArr.filter(x=>x.group_id===byName[gr.name].id).length)byName[gr.name]=gr;}const deduped=Object.values(byName).sort((a,b)=>a.name.localeCompare(b.name));setUsers(u);setGroups(deduped);setMemberships(m);setAvails(a);setLoading(false);};
   useEffect(()=>{load();},[]);
 
   const openEdit=(u)=>{setSel(u);setEditForm({full_name:u.full_name||'',phone:u.phone||'',email:u.email||''});setAddGrp('');setConfirmDelete(false);};
