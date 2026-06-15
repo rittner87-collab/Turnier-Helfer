@@ -62,6 +62,7 @@ const { useState, useEffect, useCallback, useRef } = React;
 
 const col      = (n) => db.collection(n);
 const getDocs  = async (ref) => { const s=await ref.get(); return s.docs.map(d=>({id:d.id,...d.data()})); };
+const dedupGroups = (grps, mems=[]) => { const byName={}; for(const g of grps){ const cnt=(mems||[]).filter(x=>x.group_id===g.id).length; if(!byName[g.name]||cnt>(mems||[]).filter(x=>x.group_id===byName[g.name].id).length) byName[g.name]=g; } return Object.values(byName).sort((a,b)=>a.name.localeCompare(b.name)); };
 const getDoc_  = async (ref) => { const s=await ref.get(); return s.exists?{id:s.id,...s.data()}:null; };
 const initials = (n='?') => (n||'?').split(' ').map(x=>x[0]).join('').toUpperCase().slice(0,2);
 const sortBy   = (arr,key,desc=false) => [...arr].sort((a,b)=>{ const va=a[key]||''; const vb=b[key]||''; return desc?(vb>va?1:-1):(va>vb?1:-1); });
@@ -501,7 +502,7 @@ function AdminHelpers({show}) {
   const [saving,setSaving]=useState(false);
   const [confirmDelete,setConfirmDelete]=useState(false);
 
-  const load=async()=>{setLoading(true);const [u,g,m,a]=await Promise.all([getDocs(col('users').orderBy('full_name')),getDocs(col('groups').orderBy('name')),getDocs(col('memberships')),getDocs(col('availability'))]);const mArr=m;const byName={};for(const gr of g){const cnt=mArr.filter(x=>x.group_id===gr.id).length;if(!byName[gr.name]||cnt>mArr.filter(x=>x.group_id===byName[gr.name].id).length)byName[gr.name]=gr;}const deduped=Object.values(byName).sort((a,b)=>a.name.localeCompare(b.name));setUsers(u);setGroups(deduped);setMemberships(m);setAvails(a);setLoading(false);};
+  const load=async()=>{setLoading(true);const [u,g,m,a]=await Promise.all([getDocs(col('users').orderBy('full_name')),getDocs(col('groups').orderBy('name')),getDocs(col('memberships')),getDocs(col('availability'))]);setUsers(u);setGroups(dedupGroups(g,m));setMemberships(m);setAvails(a);setLoading(false);};
   useEffect(()=>{load();},[]);
 
   const openEdit=(u)=>{setSel(u);setEditForm({full_name:u.full_name||'',phone:u.phone||'',email:u.email||''});setAddGrp('');setConfirmDelete(false);};
@@ -601,7 +602,7 @@ function AdminGroups() {
   const [users,setUsers]=useState([]);
   const [loading,setLoading]=useState(true);
 
-  useEffect(()=>{(async()=>{const [g,m,u]=await Promise.all([getDocs(col('groups').orderBy('name')),getDocs(col('memberships')),getDocs(col('users'))]);setGroups(g);setMemberships(m);setUsers(u);setLoading(false);})();},[]);
+  useEffect(()=>{(async()=>{const [g,m,u]=await Promise.all([getDocs(col('groups').orderBy('name')),getDocs(col('memberships')),getDocs(col('users'))]);setGroups(dedupGroups(g,m));setMemberships(m);setUsers(u);setLoading(false);})();},[]);
 
   const userMap=Object.fromEntries(users.map(u=>[u.id,u]));
   const groupMembers=(gid)=>memberships.filter(m=>m.group_id===gid).map(m=>userMap[m.user_id]).filter(Boolean);
@@ -650,7 +651,7 @@ function AdminTasks({show}) {
   const [groupFilter,setGroupFilter]=useState(null); // null = alle Gruppen
   const [form,setForm]=useState({title:'',description:'',group_id:'',assigned_to:'',priority:'normal',status:'open',location:''});
 
-  const load=async()=>{setLoading(true);const [t,u,g]=await Promise.all([getDocs(col('tasks')),getDocs(col('users').orderBy('full_name')),getDocs(col('groups').orderBy('name'))]);const uMap=Object.fromEntries(u.map(x=>[x.id,x]));const gMap=Object.fromEntries(g.map(x=>[x.id,x]));setTasks(sortBy(t,'created_at',true).map(x=>({...x,profile:x.assigned_to?uMap[x.assigned_to]:null,group:x.group_id?gMap[x.group_id]:null})));setUsers(u);setGroups(g);setLoading(false);};
+  const load=async()=>{setLoading(true);const [t,u,g]=await Promise.all([getDocs(col('tasks')),getDocs(col('users').orderBy('full_name')),getDocs(col('groups').orderBy('name'))]);const dg=dedupGroups(g);const uMap=Object.fromEntries(u.map(x=>[x.id,x]));const gMap=Object.fromEntries(dg.map(x=>[x.id,x]));setTasks(sortBy(t,'created_at',true).map(x=>({...x,profile:x.assigned_to?uMap[x.assigned_to]:null,group:x.group_id?gMap[x.group_id]:null})));setUsers(u);setGroups(dg);setLoading(false);};
   useEffect(()=>{load();},[]);
 
   const save=async()=>{if(!form.title.trim())return;const uid=auth.currentUser?.uid;const data={...form,group_id:form.group_id||null,assigned_to:form.assigned_to||null};if(editing)await col('tasks').doc(editing.id).update(data);else await col('tasks').add({...data,created_by:uid,created_at:ts()});load();setShowForm(false);show(editing?'Aktualisiert':'Erstellt');};
