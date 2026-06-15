@@ -227,7 +227,7 @@ function AdminDashboard({profile,setPage}) {
   useEffect(()=>{(async()=>{
     const [users,groups,tasks,avails,msgs]=await Promise.all([getDocs(col('users')),getDocs(col('groups')),getDocs(col('tasks')),getDocs(col('availability')),getDocs(col('messages').where('read','==',false))]);
     const userMap=Object.fromEntries(users.map(u=>[u.id,u]));
-    setStats({helpers:users.filter(u=>u.role==='helper').length,groups:groups.length,tasks:tasks.length,avail:avails.length,msgs:msgs.length});
+    const dg=dedupGroups(groups);setStats({helpers:users.filter(u=>u.role==='helper').length,groups:dg.length,tasks:tasks.length,avail:avails.length,msgs:msgs.length});
     setRecentTasks(sortBy(tasks,'created_at',true).slice(0,5).map(t=>({...t,profile:t.assigned_to?userMap[t.assigned_to]:null})));
     setDayStats(TOURNAMENT_DAYS.map(d=>({...d,count:avails.filter(a=>(a.days||[]).includes(d.id)).length})));
   })();},[]);
